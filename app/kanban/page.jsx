@@ -24,11 +24,16 @@ async function fetchSheet(sheetName) {
   return data.values || [];
 }
 
-async function updateStatus(taskId, newStatus, assignedTo) {
+async function updateSheetCell(sheetName, rowIndex, colIndex, value, taskId, assignedTo) {
   await fetch("https://n8n.solvtree.in/webhook/kanban-update", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ taskId, newStatus, assignedTo, source: "kanban" })
+    body: JSON.stringify({
+      taskId,
+      newStatus: value,
+      assignedTo,
+      source: "kanban"
+    })
   });
 }
 
@@ -525,7 +530,11 @@ function Board({ currentUser, accountants, onLogout }) {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    loadData();
+    const interval = setInterval(loadData, 30000);
+    return () => clearInterval(interval);
+  }, [loadData]);
 
   // Filter tasks — admin sees all, accountant sees only their own
   const visibleTasks = isAdmin
@@ -561,7 +570,14 @@ function Board({ currentUser, accountants, onLogout }) {
 
     setSaving(true);
     try {
-      await updateStatus(draggedTask.id, newStatus, draggedTask.assignedTo);
+      await updateSheetCell(
+        "Mastersheet",
+        draggedTask._rowIndex,
+        7,
+        newStatus,
+        draggedTask.id,
+        draggedTask.assignedTo
+      );
       setLastUpdated(new Date());
     } catch {
       setTasks(prev => prev.map(t =>
