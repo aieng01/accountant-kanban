@@ -2,7 +2,6 @@
 import { useState, useEffect, useCallback } from "react";
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
-const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "";
 
 const COLUMNS = [
   { id: "todo",        label: "To Do",      color: "#4A90D9", icon: "📋" },
@@ -82,8 +81,13 @@ function SelectorScreen({ accountants, onSelect }) {
   const [adminError,   setAdminError]   = useState(false);
   const [hoveredName,  setHoveredName]  = useState(null);
 
-  function handleAdminSubmit() {
-    if (adminPass === ADMIN_PASSWORD) {
+  async function handleAdminSubmit() {
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: adminPass }),
+    });
+    if (res.ok) {
       onSelect("admin");
     } else {
       setAdminError(true);
