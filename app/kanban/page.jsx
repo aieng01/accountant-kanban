@@ -860,8 +860,10 @@ function Board({ currentUser, accountants, onLogout }) {
   const loadData = useCallback(async () => {
     try {
       setError(null);
-      const rows = await fetchSheet("Mastersheet");
-      setTasks(parseMasterRows(rows));
+      const supabase = supabaseRef.current;
+      const { data, error } = await supabase.from("tasks").select("*").order("created_at", { ascending: true });
+      if (error) throw new Error(error.message);
+      setTasks((data || []).map(dbRowToTask));
       setLastUpdated(new Date());
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
