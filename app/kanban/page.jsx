@@ -860,8 +860,13 @@ function Board({ currentUser, accountants, onLogout }) {
   const loadData = useCallback(async () => {
     try {
       setError(null);
-      const rows = await fetchSheet("Mastersheet");
-      setTasks(parseMasterRows(rows));
+      const supabase = supabaseRef.current;
+      const { data, error } = await supabase
+        .from("tasks")
+        .select("*")
+        .order("created_at", { ascending: true });
+      if (error) throw new Error(error.message);
+      setTasks((data || []).map(dbRowToTask));
       setLastUpdated(new Date());
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -962,7 +967,7 @@ function Board({ currentUser, accountants, onLogout }) {
         const nextDueDate = getNextDueDate(task.recurrence);
         const newTaskId = `task_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
         const supabase = supabaseRef.current;
-        const { error: insertError } = await supabase.from("tasks").insert({
+        await supabase.from("tasks").insert({
           id:             newTaskId,
           task_name:      task.task,
           assigned_to:    task.assignedTo,
@@ -978,13 +983,12 @@ function Board({ currentUser, accountants, onLogout }) {
           permalink:      task.permalink,
           recurrence:     task.recurrence,
         });
-        alert(`insert result: nextDueDate=${nextDueDate}, error=${insertError?.message || 'none'}`);
       }
-    } catch (err) {
+    } catch {
       setTasks(prev => prev.map(t =>
         t.id === task.id ? { ...t, status: task.status } : t
       ));
-      alert(`Failed: ${err.message}`);
+      alert("Failed to update. Please try again.");
     } finally {
       setSaving(false);
       setDraggedTask(null);
