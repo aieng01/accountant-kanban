@@ -110,8 +110,11 @@ function getDueStatus(dateStr) {
 }
 
 function getNextDueDate(dueDateStr, recurrence) {
-  if (!dueDateStr || !recurrence) return null;
-  const date = new Date(dueDateStr);
+  if (!recurrence) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  // Start from today if due date is in the past, otherwise from due date
+  const base = dueDateStr ? new Date(dueDateStr) : today;
+  const date = base < today ? new Date(today) : new Date(base);
   if (recurrence === "weekly")  date.setDate(date.getDate() + 7);
   if (recurrence === "monthly") date.setMonth(date.getMonth() + 1);
   if (recurrence === "yearly")  date.setFullYear(date.getFullYear() + 1);
@@ -711,6 +714,8 @@ function Column({ col, tasks, onDragStart, onDrop, onCardClick }) {
 function TaskModal({ task, onClose, onRecurrenceChange, isAdmin }) {
   if (!task) return null;
   const prio = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.medium;
+  const [pendingRecurrence, setPendingRecurrence] = useState(task.recurrence);
+  const recurrenceChanged = pendingRecurrence !== task.recurrence;
   return (
     <div onClick={onClose} style={{
       position:"fixed", inset:0, background:"rgba(10,15,25,0.6)",
@@ -768,27 +773,46 @@ function TaskModal({ task, onClose, onRecurrenceChange, isAdmin }) {
 
           {/* Recurrence toggle — admin only */}
           {isAdmin && (
-            <div style={{
-              display:"flex", gap:12, marginBottom:12, fontSize:13,
-              alignItems:"center",
-            }}>
-              <span style={{color:"#8896A5", minWidth:120, fontSize:12}}>🔄 Repeat</span>
-              <div style={{display:"flex", gap:6, flexWrap:"wrap"}}>
-                {RECURRENCE_OPTIONS.map(opt => (
-                  <button
-                    key={String(opt.value)}
-                    onClick={() => onRecurrenceChange(task.id, opt.value)}
-                    style={{
-                      padding:"4px 12px", borderRadius:20, fontSize:11,
-                      fontWeight:600, cursor:"pointer", border:"1px solid",
-                      borderColor: task.recurrence === opt.value ? "#9B59B6" : "#E0E5EC",
-                      background: task.recurrence === opt.value ? "#9B59B622" : "#F8FAFB",
-                      color: task.recurrence === opt.value ? "#9B59B6" : "#8896A5",
-                      transition:"all 0.15s",
-                    }}
-                  >{opt.label}</button>
-                ))}
+            <div style={{marginBottom:12}}>
+              <div style={{display:"flex", gap:12, alignItems:"center"}}>
+                <span style={{color:"#8896A5", minWidth:120, fontSize:12}}>🔄 Repeat</span>
+                <div style={{display:"flex", gap:6, flexWrap:"wrap"}}>
+                  {RECURRENCE_OPTIONS.map(opt => (
+                    <button
+                      key={String(opt.value)}
+                      onClick={() => setPendingRecurrence(opt.value)}
+                      style={{
+                        padding:"4px 12px", borderRadius:20, fontSize:11,
+                        fontWeight:600, cursor:"pointer", border:"1px solid",
+                        borderColor: pendingRecurrence === opt.value ? "#9B59B6" : "#E0E5EC",
+                        background: pendingRecurrence === opt.value ? "#9B59B622" : "#F8FAFB",
+                        color: pendingRecurrence === opt.value ? "#9B59B6" : "#8896A5",
+                        transition:"all 0.15s",
+                      }}
+                    >{opt.label}</button>
+                  ))}
+                </div>
               </div>
+              {recurrenceChanged && (
+                <div style={{display:"flex", gap:8, marginTop:8, marginLeft:132}}>
+                  <button
+                    onClick={() => { onRecurrenceChange(task.id, pendingRecurrence); onClose(); }}
+                    style={{
+                      padding:"5px 16px", borderRadius:8, fontSize:12,
+                      fontWeight:600, cursor:"pointer", border:"none",
+                      background:"#9B59B6", color:"#fff",
+                    }}
+                  >Save</button>
+                  <button
+                    onClick={() => setPendingRecurrence(task.recurrence)}
+                    style={{
+                      padding:"5px 16px", borderRadius:8, fontSize:12,
+                      fontWeight:600, cursor:"pointer",
+                      border:"1px solid #E0E5EC", background:"#F8FAFB", color:"#8896A5",
+                    }}
+                  >Cancel</button>
+                </div>
+              )}
             </div>
           )}
 
