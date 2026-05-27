@@ -958,6 +958,7 @@ function Board({ currentUser, accountants, onLogout }) {
       setLastUpdated(new Date());
 
       // Create next recurring task when dragged to done
+      alert(`recurrence: ${task.recurrence}, nextDueDate: ${getNextDueDate(task.recurrence)}`);
       if (newStatus === "done" && task.recurrence) {
         const nextDueDate = getNextDueDate(task.recurrence);
         const newTaskId = `task_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
