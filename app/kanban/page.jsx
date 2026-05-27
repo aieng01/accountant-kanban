@@ -109,12 +109,9 @@ function getDueStatus(dateStr) {
   return null;
 }
 
-function getNextDueDate(dueDateStr, recurrence) {
+function getNextDueDate(recurrence) {
   if (!recurrence) return null;
-  const today = new Date(); today.setHours(0,0,0,0);
-  // Start from today if due date is in the past, otherwise from due date
-  const base = dueDateStr ? new Date(dueDateStr) : today;
-  const date = base < today ? new Date(today) : new Date(base);
+  const date = new Date(); date.setHours(0,0,0,0);
   if (recurrence === "weekly")  date.setDate(date.getDate() + 7);
   if (recurrence === "monthly") date.setMonth(date.getMonth() + 1);
   if (recurrence === "yearly")  date.setFullYear(date.getFullYear() + 1);
@@ -962,7 +959,7 @@ function Board({ currentUser, accountants, onLogout }) {
 
       // Create next recurring task when dragged to done
       if (newStatus === "done" && task.recurrence) {
-        const nextDueDate = getNextDueDate(task.dueDate, task.recurrence);
+        const nextDueDate = getNextDueDate(task.recurrence);
         const newTaskId = `task_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
         const supabase = supabaseRef.current;
         await supabase.from("tasks").insert({
