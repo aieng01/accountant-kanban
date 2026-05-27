@@ -18,6 +18,7 @@ interface Task {
   slack_ts: string
   channel_id: string
   permalink: string
+  recurrence: string | null
   created_at: string
   updated_at: string
 }
@@ -154,6 +155,7 @@ function masterRow(t: Task) {
     t.id, t.task_name, t.assigned_to, t.client_name, t.due_date,
     t.priority, t.entry_type, t.status, t.source_message,
     t.posted_by, t.posted_at, t.slack_ts, t.channel_id, t.permalink,
+    t.recurrence ?? '',
   ]
 }
 

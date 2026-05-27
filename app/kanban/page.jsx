@@ -62,7 +62,7 @@ function parseMasterRows(rows) {
     slackTs:    r[11] || "",
     channelId:  r[12] || "",
     permalink:  r[13] || "",
-    recurrence: null,
+    recurrence: r[14] || null,
   }));
 }
 
