@@ -936,7 +936,6 @@ function Board({ currentUser, accountants, onLogout }) {
 
   const handleDrop = async (e, newStatus) => {
     e.preventDefault();
-    alert(`drop fired: draggedTask=${JSON.stringify(draggedTask?.id)}, recurrence=${draggedTask?.recurrence}, newStatus=${newStatus}`);
     if (!draggedTask || draggedTask.status === newStatus) {
       setDraggedTask(null); return;
     }
@@ -963,7 +962,7 @@ function Board({ currentUser, accountants, onLogout }) {
         const nextDueDate = getNextDueDate(task.recurrence);
         const newTaskId = `task_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
         const supabase = supabaseRef.current;
-        await supabase.from("tasks").insert({
+        const { error: insertError } = await supabase.from("tasks").insert({
           id:             newTaskId,
           task_name:      task.task,
           assigned_to:    task.assignedTo,
@@ -979,12 +978,13 @@ function Board({ currentUser, accountants, onLogout }) {
           permalink:      task.permalink,
           recurrence:     task.recurrence,
         });
+        alert(`insert result: nextDueDate=${nextDueDate}, error=${insertError?.message || 'none'}`);
       }
-    } catch {
+    } catch (err) {
       setTasks(prev => prev.map(t =>
         t.id === task.id ? { ...t, status: task.status } : t
       ));
-      alert("Failed to update. Please try again.");
+      alert(`Failed: ${err.message}`);
     } finally {
       setSaving(false);
       setDraggedTask(null);
