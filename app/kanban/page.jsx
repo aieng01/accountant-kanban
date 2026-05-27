@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { createClient } from "@supabase/supabase-js";
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 
@@ -15,6 +16,13 @@ const PRIORITY_COLORS = {
   medium: { bg: "#FFF4E0", text: "#D68910", dot: "#F39C12" },
   low:    { bg: "#E8F8F0", text: "#1E8449", dot: "#27AE60" },
 };
+
+const RECURRENCE_OPTIONS = [
+  { value: null,      label: "None" },
+  { value: "weekly",  label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "yearly",  label: "Yearly" },
+];
 
 // ─── API HELPERS ─────────────────────────────────────────────────────────────
 async function fetchSheet(sheetName) {
@@ -54,6 +62,7 @@ function parseMasterRows(rows) {
     slackTs:    r[11] || "",
     channelId:  r[12] || "",
     permalink:  r[13] || "",
+    recurrence: null,
   }));
 }
 
@@ -67,6 +76,27 @@ function parseConfigRows(rows) {
   }));
 }
 
+function dbRowToTask(row) {
+  return {
+    _rowIndex:  0,
+    id:         row.id          || "",
+    task:       row.task_name   || "",
+    assignedTo: row.assigned_to || "",
+    client:     row.client_name || "",
+    dueDate:    row.due_date    || "",
+    priority:  (row.priority    || "medium").toLowerCase(),
+    entryType:  row.entry_type  || "",
+    status:    (row.status      || "todo").toLowerCase().replace(/ /g, "_"),
+    sourceMsg:  row.source_message || "",
+    postedBy:   row.posted_by   || "",
+    postedAt:   row.posted_at   || "",
+    slackTs:    row.slack_ts    || "",
+    channelId:  row.channel_id  || "",
+    permalink:  row.permalink   || "",
+    recurrence: row.recurrence  || null,
+  };
+}
+
 function getDueStatus(dateStr) {
   if (!dateStr) return null;
   const today = new Date(); today.setHours(0,0,0,0);
@@ -77,6 +107,258 @@ function getDueStatus(dateStr) {
   if (diff === 1)  return { label: "Due Tomorrow", color: "#F39C12" };
   if (diff <= 3)   return { label: `${diff} days`, color: "#3498DB" };
   return null;
+}
+
+function getNextDueDate(dueDateStr, recurrence) {
+  if (!dueDateStr || !recurrence) return null;
+  const date = new Date(dueDateStr);
+  if (recurrence === "weekly")  date.setDate(date.getDate() + 7);
+  if (recurrence === "monthly") date.setMonth(date.getMonth() + 1);
+  if (recurrence === "yearly")  date.setFullYear(date.getFullYear() + 1);
+  return date.toISOString().split("T")[0];
+}
+
+// ─── COMPANY PANEL ───────────────────────────────────────────────────────────
+function CompanyPanel({ tasks, selectedCompany, onSelectCompany, onClose }) {
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  const companies = [...new Set(tasks.map(t => t.client).filter(Boolean))].sort();
+
+  const getCompanyStats = (company) => {
+    const companyTasks = tasks.filter(t => t.client === company);
+    const active = companyTasks.filter(t => t.status !== "done");
+    const done   = companyTasks.filter(t => t.status === "done");
+    const overdue = active.filter(t => {
+      if (!t.dueDate) return false;
+      const due = new Date(t.dueDate); due.setHours(0,0,0,0);
+      return due < today;
+    });
+    const cas = [...new Set(companyTasks.map(t => t.assignedTo).filter(Boolean))];
+    const upcoming = active
+      .filter(t => t.dueDate)
+      .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+      .slice(0, 3);
+    return { active, done, overdue, cas, upcoming, all: companyTasks };
+  };
+
+  const avatarColors = ["#4A90D9","#E74C3C","#27AE60","#9B59B6","#F39C12","#1ABC9C"];
+
+  return (
+    <div style={{
+      position:"fixed", top:0, right:0, bottom:0,
+      width:380, background:"#FFFFFF",
+      boxShadow:"-4px 0 24px rgba(0,0,0,0.12)",
+      zIndex:200, display:"flex", flexDirection:"column",
+      fontFamily:"'DM Mono', monospace",
+    }}>
+      {/* Header */}
+      <div style={{
+        padding:"20px 24px", borderBottom:"1px solid #E8ECF0",
+        display:"flex", alignItems:"center", justifyContent:"space-between",
+        background:"linear-gradient(135deg, #1A2332, #2C3E50)",
+      }}>
+        <div>
+          <div style={{fontSize:14, fontWeight:700, color:"#FFFFFF", fontFamily:"'Fraunces', serif"}}>
+            🏢 Companies
+          </div>
+          <div style={{fontSize:10, color:"#8896A5", marginTop:2}}>
+            {companies.length} client{companies.length !== 1 ? "s" : ""}
+          </div>
+        </div>
+        <button onClick={onClose} style={{
+          background:"rgba(255,255,255,0.1)", border:"none",
+          borderRadius:8, padding:"6px 10px",
+          color:"#FFFFFF", cursor:"pointer", fontSize:16,
+        }}>✕</button>
+      </div>
+
+      <div style={{flex:1, overflowY:"auto"}}>
+        {!selectedCompany ? (
+          // Company list
+          <div style={{padding:"12px"}}>
+            {companies.length === 0 && (
+              <div style={{textAlign:"center", padding:"40px 0", color:"#B0BBC8", fontSize:12}}>
+                No companies found
+              </div>
+            )}
+            {companies.map(company => {
+              const stats = getCompanyStats(company);
+              return (
+                <div
+                  key={company}
+                  onClick={() => onSelectCompany(company)}
+                  style={{
+                    background:"#F8FAFB", border:"1px solid #E8ECF0",
+                    borderRadius:12, padding:"14px 16px", marginBottom:8,
+                    cursor:"pointer", transition:"all 0.15s ease",
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = "#EEF4FF";
+                    e.currentTarget.style.borderColor = "#4A90D9";
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = "#F8FAFB";
+                    e.currentTarget.style.borderColor = "#E8ECF0";
+                  }}
+                >
+                  <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8}}>
+                    <div style={{fontSize:13, fontWeight:600, color:"#1A2332", fontFamily:"'Fraunces', serif"}}>
+                      {company}
+                    </div>
+                    {stats.overdue.length > 0 && (
+                      <span style={{
+                        background:"#FFE8E8", color:"#E74C3C",
+                        fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:20,
+                      }}>
+                        {stats.overdue.length} overdue
+                      </span>
+                    )}
+                  </div>
+                  <div style={{display:"flex", gap:12, fontSize:11, color:"#8896A5"}}>
+                    <span>📋 {stats.active.length} active</span>
+                    <span>✅ {stats.done.length} done</span>
+                    <span>👤 {stats.cas.join(", ") || "Unassigned"}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          // Company detail view
+          <div>
+            <div style={{padding:"16px 20px", borderBottom:"1px solid #E8ECF0"}}>
+              <button
+                onClick={() => onSelectCompany(null)}
+                style={{
+                  background:"none", border:"none", cursor:"pointer",
+                  fontSize:12, color:"#4A90D9", fontWeight:600, padding:0,
+                  marginBottom:12,
+                }}
+              >← All Companies</button>
+              <div style={{fontSize:16, fontWeight:700, color:"#1A2332", fontFamily:"'Fraunces', serif"}}>
+                {selectedCompany}
+              </div>
+            </div>
+
+            {(() => {
+              const stats = getCompanyStats(selectedCompany);
+              return (
+                <div style={{padding:"16px 20px"}}>
+                  {/* Stats row */}
+                  <div style={{display:"flex", gap:12, marginBottom:20}}>
+                    {[
+                      ["Active", stats.active.length, "#4A90D9"],
+                      ["Done",   stats.done.length,   "#27AE60"],
+                      ["Overdue",stats.overdue.length, "#E74C3C"],
+                    ].map(([label, count, color]) => (
+                      <div key={label} style={{
+                        flex:1, background:"#F8FAFB", borderRadius:10,
+                        padding:"10px", textAlign:"center",
+                        border:`1px solid ${color}22`,
+                      }}>
+                        <div style={{fontSize:18, fontWeight:700, color, fontFamily:"'Fraunces', serif"}}>{count}</div>
+                        <div style={{fontSize:10, color:"#8896A5"}}>{label}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* CAs assigned */}
+                  <div style={{marginBottom:16}}>
+                    <div style={{fontSize:10, color:"#8896A5", textTransform:"uppercase", letterSpacing:"1px", marginBottom:8}}>
+                      CA Assigned
+                    </div>
+                    <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
+                      {stats.cas.length === 0 ? (
+                        <span style={{fontSize:12, color:"#B0BBC8"}}>None assigned</span>
+                      ) : stats.cas.map(ca => (
+                        <div key={ca} style={{
+                          display:"flex", alignItems:"center", gap:6,
+                          background:"#F4F6F9", borderRadius:20, padding:"4px 10px",
+                        }}>
+                          <div style={{
+                            width:20, height:20, borderRadius:"50%",
+                            background: avatarColors[ca.charCodeAt(0) % avatarColors.length],
+                            display:"flex", alignItems:"center", justifyContent:"center",
+                            color:"#fff", fontSize:9, fontWeight:700,
+                          }}>{ca.slice(0,2).toUpperCase()}</div>
+                          <span style={{fontSize:12, color:"#1A2332", fontWeight:600}}>{ca}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Upcoming due dates */}
+                  {stats.upcoming.length > 0 && (
+                    <div style={{marginBottom:16}}>
+                      <div style={{fontSize:10, color:"#8896A5", textTransform:"uppercase", letterSpacing:"1px", marginBottom:8}}>
+                        Upcoming Deadlines
+                      </div>
+                      {stats.upcoming.map(t => {
+                        const dueInfo = getDueStatus(t.dueDate);
+                        return (
+                          <div key={t.id} style={{
+                            display:"flex", justifyContent:"space-between", alignItems:"center",
+                            padding:"8px 0", borderBottom:"1px solid #F0F2F5",
+                          }}>
+                            <span style={{fontSize:12, color:"#1A2332"}}>{t.task}</span>
+                            {dueInfo && (
+                              <span style={{
+                                fontSize:10, color: dueInfo.color, fontWeight:600,
+                                background: dueInfo.color+"18", borderRadius:20, padding:"2px 8px",
+                              }}>{dueInfo.label}</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Active tasks */}
+                  <div style={{marginBottom:16}}>
+                    <div style={{fontSize:10, color:"#8896A5", textTransform:"uppercase", letterSpacing:"1px", marginBottom:8}}>
+                      Active Tasks ({stats.active.length})
+                    </div>
+                    {stats.active.length === 0 ? (
+                      <div style={{fontSize:12, color:"#B0BBC8"}}>No active tasks</div>
+                    ) : stats.active.map(t => (
+                      <div key={t.id} style={{
+                        background:"#F8FAFB", borderRadius:8, padding:"10px 12px",
+                        marginBottom:6, borderLeft:`3px solid ${PRIORITY_COLORS[t.priority]?.dot || "#4A90D9"}`,
+                      }}>
+                        <div style={{fontSize:12, fontWeight:600, color:"#1A2332", marginBottom:4}}>{t.task}</div>
+                        <div style={{fontSize:11, color:"#8896A5"}}>
+                          {t.assignedTo || "Unassigned"} · {t.status.replace(/_/g," ")}
+                          {t.recurrence && <span style={{marginLeft:6, color:"#9B59B6"}}>🔄 {t.recurrence}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Task history */}
+                  {stats.done.length > 0 && (
+                    <div>
+                      <div style={{fontSize:10, color:"#8896A5", textTransform:"uppercase", letterSpacing:"1px", marginBottom:8}}>
+                        Completed ({stats.done.length})
+                      </div>
+                      {stats.done.map(t => (
+                        <div key={t.id} style={{
+                          padding:"8px 0", borderBottom:"1px solid #F0F2F5",
+                          display:"flex", alignItems:"center", gap:8,
+                        }}>
+                          <span style={{color:"#27AE60", fontSize:12}}>✅</span>
+                          <span style={{fontSize:12, color:"#8896A5", textDecoration:"line-through"}}>{t.task}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ─── SELECTOR SCREEN ─────────────────────────────────────────────────────────
@@ -326,15 +608,20 @@ function TaskCard({ task, onDragStart, onClick }) {
         e.currentTarget.style.transform = "translateY(0)";
       }}
     >
-      <div style={{
-        display:"inline-flex", alignItems:"center", gap:5,
-        background:prio.bg, color:prio.text,
-        borderRadius:20, padding:"2px 8px",
-        fontSize:10, fontWeight:600, marginBottom:8,
-        textTransform:"uppercase", letterSpacing:"0.5px",
-      }}>
-        <div style={{width:5,height:5,borderRadius:"50%",background:prio.dot}}/>
-        {task.priority}
+      <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8}}>
+        <div style={{
+          display:"inline-flex", alignItems:"center", gap:5,
+          background:prio.bg, color:prio.text,
+          borderRadius:20, padding:"2px 8px",
+          fontSize:10, fontWeight:600,
+          textTransform:"uppercase", letterSpacing:"0.5px",
+        }}>
+          <div style={{width:5,height:5,borderRadius:"50%",background:prio.dot}}/>
+          {task.priority}
+        </div>
+        {task.recurrence && (
+          <span style={{fontSize:10, color:"#9B59B6", fontWeight:600}}>🔄 {task.recurrence}</span>
+        )}
       </div>
 
       <div style={{
@@ -421,7 +708,7 @@ function Column({ col, tasks, onDragStart, onDrop, onCardClick }) {
 }
 
 // ─── TASK MODAL ───────────────────────────────────────────────────────────────
-function TaskModal({ task, onClose }) {
+function TaskModal({ task, onClose, onRecurrenceChange }) {
   if (!task) return null;
   const prio = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.medium;
   return (
@@ -479,6 +766,30 @@ function TaskModal({ task, onClose }) {
             </div>
           ))}
 
+          {/* Recurrence toggle */}
+          <div style={{
+            display:"flex", gap:12, marginBottom:12, fontSize:13,
+            alignItems:"center",
+          }}>
+            <span style={{color:"#8896A5", minWidth:120, fontSize:12}}>🔄 Repeat</span>
+            <div style={{display:"flex", gap:6, flexWrap:"wrap"}}>
+              {RECURRENCE_OPTIONS.map(opt => (
+                <button
+                  key={String(opt.value)}
+                  onClick={() => onRecurrenceChange(task.id, opt.value)}
+                  style={{
+                    padding:"4px 12px", borderRadius:20, fontSize:11,
+                    fontWeight:600, cursor:"pointer", border:"1px solid",
+                    borderColor: task.recurrence === opt.value ? "#9B59B6" : "#E0E5EC",
+                    background: task.recurrence === opt.value ? "#9B59B622" : "#F8FAFB",
+                    color: task.recurrence === opt.value ? "#9B59B6" : "#8896A5",
+                    transition:"all 0.15s",
+                  }}
+                >{opt.label}</button>
+              ))}
+            </div>
+          </div>
+
           {task.sourceMsg && (
             <div style={{
               background:"#F4F6F9", borderRadius:10,
@@ -512,13 +823,16 @@ function TaskModal({ task, onClose }) {
 function Board({ currentUser, accountants, onLogout }) {
   const isAdmin = currentUser === "admin";
 
-  const [tasks,       setTasks]       = useState([]);
-  const [loading,     setLoading]     = useState(true);
-  const [error,       setError]       = useState(null);
-  const [draggedTask, setDraggedTask] = useState(null);
-  const [modalTask,   setModalTask]   = useState(null);
-  const [saving,      setSaving]      = useState(false);
-  const [lastUpdated, setLastUpdated] = useState(null);
+  const [tasks,          setTasks]          = useState([]);
+  const [loading,        setLoading]        = useState(true);
+  const [error,          setError]          = useState(null);
+  const [draggedTask,    setDraggedTask]    = useState(null);
+  const [modalTask,      setModalTask]      = useState(null);
+  const [saving,         setSaving]         = useState(false);
+  const [lastUpdated,    setLastUpdated]    = useState(null);
+  const [companyPanelOpen, setCompanyPanelOpen] = useState(false);
+  const [selectedCompany,  setSelectedCompany]  = useState(null);
+  const [companyFilter,    setCompanyFilter]    = useState(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -530,16 +844,55 @@ function Board({ currentUser, accountants, onLogout }) {
     finally { setLoading(false); }
   }, []);
 
+  const supabaseRef = useRef(
+    createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    )
+  );
+
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 30000);
-    return () => clearInterval(interval);
+
+    const supabase = supabaseRef.current;
+    const channel = supabase
+      .channel("tasks-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tasks" },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            const t = payload.new;
+            setTasks(prev => {
+              if (prev.find(x => x.id === t.id)) return prev;
+              return [...prev, dbRowToTask(t)];
+            });
+          } else if (payload.eventType === "UPDATE") {
+            setTasks(prev =>
+              prev.map(x => x.id === payload.new.id ? dbRowToTask(payload.new) : x)
+            );
+            setModalTask(prev =>
+              prev && prev.id === payload.new.id ? dbRowToTask(payload.new) : prev
+            );
+          } else if (payload.eventType === "DELETE") {
+            setTasks(prev => prev.filter(x => x.id !== payload.old.id));
+          }
+          setLastUpdated(new Date());
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [loadData]);
 
   // Filter tasks — admin sees all, accountant sees only their own
-  const visibleTasks = isAdmin
+  let visibleTasks = isAdmin
     ? tasks
     : tasks.filter(t => t.assignedTo?.toLowerCase() === currentUser.toLowerCase());
+
+  if (companyFilter) {
+    visibleTasks = visibleTasks.filter(t => t.client === companyFilter);
+  }
 
   const tasksByColumn = (colId) =>
     visibleTasks.filter(t => (t.status || "todo") === colId);
@@ -564,30 +917,73 @@ function Board({ currentUser, accountants, onLogout }) {
       setDraggedTask(null); return;
     }
 
+    const task = draggedTask;
     setTasks(prev => prev.map(t =>
-      t.id === draggedTask.id ? { ...t, status: newStatus } : t
+      t.id === task.id ? { ...t, status: newStatus } : t
     ));
 
     setSaving(true);
     try {
       await updateSheetCell(
         "Mastersheet",
-        draggedTask._rowIndex,
+        task._rowIndex,
         7,
         newStatus,
-        draggedTask.id,
-        draggedTask.assignedTo
+        task.id,
+        task.assignedTo
       );
       setLastUpdated(new Date());
+
+      // Create next recurring task when dragged to done
+      if (newStatus === "done" && task.recurrence) {
+        const nextDueDate = getNextDueDate(task.dueDate, task.recurrence);
+        const newTaskId = `task_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
+        const supabase = supabaseRef.current;
+        await supabase.from("tasks").insert({
+          id:             newTaskId,
+          task_name:      task.task,
+          assigned_to:    task.assignedTo,
+          client_name:    task.client,
+          due_date:       nextDueDate,
+          priority:       task.priority,
+          entry_type:     task.entryType,
+          status:         "todo",
+          source_message: `Auto-created from recurring task (${task.recurrence})`,
+          posted_by:      task.postedBy,
+          slack_ts:       task.slackTs,
+          channel_id:     task.channelId,
+          permalink:      task.permalink,
+          recurrence:     task.recurrence,
+        });
+      }
     } catch {
       setTasks(prev => prev.map(t =>
-        t.id === draggedTask.id ? { ...t, status: draggedTask.status } : t
+        t.id === task.id ? { ...t, status: task.status } : t
       ));
       alert("Failed to update. Please try again.");
     } finally {
       setSaving(false);
       setDraggedTask(null);
     }
+  };
+
+  const handleRecurrenceChange = async (taskId, recurrence) => {
+    const supabase = supabaseRef.current;
+    await supabase.from("tasks").update({ recurrence }).eq("id", taskId);
+    // Optimistic update for modal
+    setModalTask(prev => prev && prev.id === taskId ? { ...prev, recurrence } : prev);
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, recurrence } : t));
+  };
+
+  const handleSelectCompany = (company) => {
+    setSelectedCompany(company);
+    setCompanyFilter(company);
+  };
+
+  const handleCloseCompanyPanel = () => {
+    setCompanyPanelOpen(false);
+    setSelectedCompany(null);
+    setCompanyFilter(null);
   };
 
   const avatarColors = ["#4A90D9","#E74C3C","#27AE60","#9B59B6","#F39C12","#1ABC9C"];
@@ -651,6 +1047,23 @@ function Board({ currentUser, accountants, onLogout }) {
                 }}>ADMIN</span>
               )}
             </div>
+            {/* Active company filter indicator */}
+            {companyFilter && (
+              <div style={{
+                display:"flex", alignItems:"center", gap:6,
+                background:"#EEF4FF", border:"1px solid #4A90D9",
+                borderRadius:20, padding:"4px 12px",
+              }}>
+                <span style={{fontSize:12, color:"#4A90D9", fontWeight:600}}>🏢 {companyFilter}</span>
+                <button
+                  onClick={() => { setCompanyFilter(null); setSelectedCompany(null); }}
+                  style={{
+                    background:"none", border:"none", cursor:"pointer",
+                    color:"#4A90D9", fontSize:14, padding:0, lineHeight:1,
+                  }}
+                >✕</button>
+              </div>
+            )}
           </div>
 
           {/* Stats */}
@@ -674,11 +1087,29 @@ function Board({ currentUser, accountants, onLogout }) {
           {/* Controls */}
           <div style={{display:"flex", alignItems:"center", gap:10}}>
             {saving && <span style={{fontSize:11, color:"#F39C12"}}>💾 Saving...</span>}
-            {lastUpdated && !saving && (
-              <span style={{fontSize:11, color:"#B0BBC8"}}>
-                ↻ {lastUpdated.toLocaleTimeString()}
+            {!saving && (
+              <span style={{fontSize:11, color:"#27AE60", display:"flex", alignItems:"center", gap:4}}>
+                <span style={{
+                  width:7, height:7, borderRadius:"50%", background:"#27AE60",
+                  display:"inline-block", animation:"pulse 2s infinite",
+                }}/>
+                Live
               </span>
             )}
+            <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
+            {/* Company filter button */}
+            <button
+              onClick={() => setCompanyPanelOpen(true)}
+              style={{
+                background: companyFilter ? "#4A90D9" : "#F4F6F9",
+                border:`1px solid ${companyFilter ? "#4A90D9" : "#E0E5EC"}`,
+                borderRadius:8, padding:"6px 14px",
+                fontSize:14, cursor:"pointer",
+                color: companyFilter ? "#fff" : "#4D5E70",
+                fontWeight:600, transition:"all 0.15s",
+              }}
+              title="Filter by company"
+            >🏢</button>
             <button onClick={loadData} style={{
               background:"#F4F6F9", border:"1px solid #E0E5EC",
               borderRadius:8, padding:"6px 14px",
@@ -741,16 +1172,34 @@ function Board({ currentUser, accountants, onLogout }) {
               fontSize:16, fontFamily:"'Fraunces', serif",
               color:"#8896A5", marginBottom:6,
             }}>
-              {isAdmin ? "No tasks yet" : `No tasks assigned to ${currentUser} yet`}
+              {companyFilter
+                ? `No tasks for ${companyFilter}`
+                : isAdmin ? "No tasks yet" : `No tasks assigned to ${currentUser} yet`}
             </div>
             <div style={{fontSize:12}}>
-              Tasks appear here once accountants post schedules in Slack.
+              {companyFilter
+                ? <button onClick={() => setCompanyFilter(null)} style={{background:"none",border:"none",color:"#4A90D9",cursor:"pointer",fontSize:12}}>Clear filter</button>
+                : "Tasks appear here once accountants post schedules in Slack."
+              }
             </div>
           </div>
         )}
       </div>
 
-      <TaskModal task={modalTask} onClose={() => setModalTask(null)}/>
+      <TaskModal
+        task={modalTask}
+        onClose={() => setModalTask(null)}
+        onRecurrenceChange={handleRecurrenceChange}
+      />
+
+      {companyPanelOpen && (
+        <CompanyPanel
+          tasks={tasks}
+          selectedCompany={selectedCompany}
+          onSelectCompany={handleSelectCompany}
+          onClose={handleCloseCompanyPanel}
+        />
+      )}
     </div>
   );
 }
