@@ -936,6 +936,7 @@ function Board({ currentUser, accountants, onLogout }) {
 
   const handleDrop = async (e, newStatus) => {
     e.preventDefault();
+    alert(`drop fired: draggedTask=${JSON.stringify(draggedTask?.id)}, recurrence=${draggedTask?.recurrence}, newStatus=${newStatus}`);
     if (!draggedTask || draggedTask.status === newStatus) {
       setDraggedTask(null); return;
     }
@@ -958,7 +959,6 @@ function Board({ currentUser, accountants, onLogout }) {
       setLastUpdated(new Date());
 
       // Create next recurring task when dragged to done
-      alert(`recurrence: ${task.recurrence}, nextDueDate: ${getNextDueDate(task.recurrence)}`);
       if (newStatus === "done" && task.recurrence) {
         const nextDueDate = getNextDueDate(task.recurrence);
         const newTaskId = `task_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
