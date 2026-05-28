@@ -122,10 +122,16 @@ function getNextDueDate(recurrence) {
 function CompanyPanel({ tasks, selectedCompany, onSelectCompany, onClose }) {
   const today = new Date(); today.setHours(0,0,0,0);
 
-  const companies = [...new Set(tasks.map(t => t.client).filter(Boolean))].sort();
+  const hasNoCompany = tasks.some(t => !t.client);
+  const companies = [
+    ...( hasNoCompany ? ["—No Company—"] : [] ),
+    ...[...new Set(tasks.map(t => t.client).filter(Boolean))].sort(),
+  ];
 
   const getCompanyStats = (company) => {
-    const companyTasks = tasks.filter(t => t.client === company);
+    const companyTasks = company === "—No Company—"
+      ? tasks.filter(t => !t.client)
+      : tasks.filter(t => t.client === company);
     const active = companyTasks.filter(t => t.status !== "done");
     const done   = companyTasks.filter(t => t.status === "done");
     const overdue = active.filter(t => {
@@ -641,13 +647,17 @@ function TaskCard({ task, onDragStart, onClick }) {
           {task.assignedTo && <Avatar name={task.assignedTo}/>}
           <span style={{fontSize:11, color:"#8896A5"}}>{task.assignedTo || "Unassigned"}</span>
         </div>
-        {dueInfo && (
+        {dueInfo ? (
           <div style={{
             background:dueInfo.color+"18", color:dueInfo.color,
             borderRadius:20, padding:"2px 8px",
             fontSize:10, fontWeight:600,
           }}>{dueInfo.label}</div>
-        )}
+        ) : task.dueDate ? (
+          <div style={{
+            color:"#8896A5", fontSize:10,
+          }}>📅 {task.dueDate}</div>
+        ) : null}
       </div>
     </div>
   );
@@ -919,7 +929,9 @@ function Board({ currentUser, accountants, onLogout }) {
     : tasks.filter(t => t.assignedTo?.toLowerCase() === currentUser.toLowerCase());
 
   if (companyFilter) {
-    visibleTasks = visibleTasks.filter(t => t.client === companyFilter);
+    visibleTasks = companyFilter === "__none__"
+      ? visibleTasks.filter(t => !t.client)
+      : visibleTasks.filter(t => t.client === companyFilter);
   }
 
   const tasksByColumn = (colId) =>
@@ -1005,7 +1017,7 @@ function Board({ currentUser, accountants, onLogout }) {
 
   const handleSelectCompany = (company) => {
     setSelectedCompany(company);
-    setCompanyFilter(company);
+    setCompanyFilter(company === "—No Company—" ? "__none__" : company);
   };
 
   const handleCloseCompanyPanel = () => {
@@ -1082,7 +1094,7 @@ function Board({ currentUser, accountants, onLogout }) {
                 background:"#EEF4FF", border:"1px solid #4A90D9",
                 borderRadius:20, padding:"4px 12px",
               }}>
-                <span style={{fontSize:12, color:"#4A90D9", fontWeight:600}}>🏢 {companyFilter}</span>
+                <span style={{fontSize:12, color:"#4A90D9", fontWeight:600}}>🏢 {companyFilter === "__none__" ? "No Company" : companyFilter}</span>
                 <button
                   onClick={() => { setCompanyFilter(null); setSelectedCompany(null); }}
                   style={{
@@ -1201,7 +1213,7 @@ function Board({ currentUser, accountants, onLogout }) {
               color:"#8896A5", marginBottom:6,
             }}>
               {companyFilter
-                ? `No tasks for ${companyFilter}`
+                ? `No tasks for ${companyFilter === "__none__" ? "No Company" : companyFilter}`
                 : isAdmin ? "No tasks yet" : `No tasks assigned to ${currentUser} yet`}
             </div>
             <div style={{fontSize:12}}>
