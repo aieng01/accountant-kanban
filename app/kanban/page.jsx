@@ -22,6 +22,7 @@ const RECURRENCE_OPTIONS = [
   { value: "weekly",    label: "Weekly" },
   { value: "monthly",   label: "Monthly" },
   { value: "quarterly", label: "Quarterly" },
+  { value: "yearly",    label: "Yearly" },
 ];
 
 // ─── API HELPERS ─────────────────────────────────────────────────────────────
@@ -115,6 +116,7 @@ function getNextDueDate(recurrence) {
   if (recurrence === "weekly")    date.setDate(date.getDate() + 7);
   if (recurrence === "monthly")   date.setMonth(date.getMonth() + 1);
   if (recurrence === "quarterly") date.setMonth(date.getMonth() + 3);
+  if (recurrence === "yearly")    date.setFullYear(date.getFullYear() + 1);
   return date.toISOString().split("T")[0];
 }
 
